@@ -380,7 +380,7 @@ class MecabTokenizer:
         do_lower_case=False,
         never_split=None,
         normalize_text=True,
-        mecab_dic: Optional[str] = "unidic_lite",
+        mecab_dic: Optional[str] = "ipadic",
         mecab_option: Optional[str] = None,
     ):
         """
@@ -691,7 +691,7 @@ class CharacterTokenizer:
 
 
 # Copied from transformers.models.bert.tokenization_bert.BasicTokenizer
-class BasicTokenizer:
+class BasicTokenizer(object):
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -853,7 +853,7 @@ class BasicTokenizer:
 
 
 # Copied from transformers.models.bert.tokenization_bert.WordpieceTokenizer
-class WordpieceTokenizer:
+class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):
@@ -910,7 +910,7 @@ class WordpieceTokenizer:
         return output_tokens
 
 
-class SentencepieceTokenizer:
+class SentencepieceTokenizer(object):
     """
     Runs sentencepiece tokenization. Based on transformers.models.albert.tokenization_albert.AlbertTokenizer.
     """
@@ -977,6 +977,3 @@ class SentencepieceTokenizer:
                 new_pieces.append(piece)
 
         return new_pieces
-
-
-__all__ = ["BertJapaneseTokenizer", "CharacterTokenizer", "MecabTokenizer"]

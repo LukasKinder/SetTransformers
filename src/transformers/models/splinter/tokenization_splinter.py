@@ -137,7 +137,6 @@ class SplinterTokenizer(PreTrainedTokenizer):
             pad_token=pad_token,
             cls_token=cls_token,
             mask_token=mask_token,
-            question_token=question_token,
             tokenize_chinese_chars=tokenize_chinese_chars,
             strip_accents=strip_accents,
             **kwargs,
@@ -298,7 +297,7 @@ class SplinterTokenizer(PreTrainedTokenizer):
         return (vocab_file,)
 
 
-class BasicTokenizer:
+class BasicTokenizer(object):
     """
     Constructs a BasicTokenizer that will run basic tokenization (punctuation splitting, lower casing, etc.).
 
@@ -447,7 +446,7 @@ class BasicTokenizer:
         return "".join(output)
 
 
-class WordpieceTokenizer:
+class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
 
     def __init__(self, vocab, unk_token, max_input_chars_per_word=100):

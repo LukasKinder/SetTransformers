@@ -15,7 +15,7 @@
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
-from ..auto import CONFIG_MAPPING, AutoConfig
+from ..auto import CONFIG_MAPPING
 
 
 logger = logging.get_logger(__name__)
@@ -47,8 +47,6 @@ class VipLlavaConfig(PretrainedConfig):
             The layer norm epsilon of the projector layernorm
         vision_feature_layers (`List[int]`, *optional*, defaults to `[-2, -5, -8, -11, 6]`):
             The list of layers to select the vision features from.
-        image_seq_length (`int`, *optional*, defaults to 576):
-            Sequence length of one image embedding.
 
     Example:
 
@@ -72,7 +70,7 @@ class VipLlavaConfig(PretrainedConfig):
     ```"""
 
     model_type = "vipllava"
-    sub_configs = {"text_config": AutoConfig, "vision_config": AutoConfig}
+    is_composition = False
 
     def __init__(
         self,
@@ -83,7 +81,6 @@ class VipLlavaConfig(PretrainedConfig):
         projector_hidden_act="gelu",
         projector_layernorm_eps=1e-5,
         vision_feature_layers=[-2, -5, -8, -11, 6],
-        image_seq_length=576,
         **kwargs,
     ):
         self.ignore_index = ignore_index
@@ -91,7 +88,6 @@ class VipLlavaConfig(PretrainedConfig):
         self.projector_hidden_act = projector_hidden_act
         self.projector_layernorm_eps = projector_layernorm_eps
         self.vision_feature_layers = vision_feature_layers
-        self.image_seq_length = image_seq_length
         self.vision_config = vision_config
 
         if isinstance(self.vision_config, dict):

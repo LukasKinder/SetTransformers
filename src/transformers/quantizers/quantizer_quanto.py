@@ -23,12 +23,7 @@ from .quantizers_utils import get_module_from_name
 if TYPE_CHECKING:
     from ..modeling_utils import PreTrainedModel
 
-from ..utils import (
-    is_accelerate_available,
-    is_optimum_quanto_available,
-    is_torch_available,
-    logging,
-)
+from ..utils import is_accelerate_available, is_quanto_available, is_torch_available, logging
 from ..utils.quantization_config import QuantoConfig
 
 
@@ -62,13 +57,11 @@ class QuantoHfQuantizer(HfQuantizer):
             )
 
     def validate_environment(self, *args, **kwargs):
-        if not is_optimum_quanto_available():
-            raise ImportError(
-                "Loading an optimum-quanto quantized model requires optimum-quanto library (`pip install optimum-quanto`)"
-            )
+        if not is_quanto_available():
+            raise ImportError("Loading a quanto quantized model requires quanto library (`pip install quanto`)")
         if not is_accelerate_available():
             raise ImportError(
-                "Loading an optimum-quanto quantized model requires accelerate library (`pip install accelerate`)"
+                "Loading a quanto quantized model requires accelerate library (`pip install accelerate`)"
             )
 
     def update_device_map(self, device_map):
@@ -88,12 +81,11 @@ class QuantoHfQuantizer(HfQuantizer):
         return torch_dtype
 
     def update_missing_keys(self, model, missing_keys: List[str], prefix: str) -> List[str]:
-        if is_optimum_quanto_available():
-            from optimum.quanto import QModuleMixin
+        import quanto
 
         not_missing_keys = []
         for name, module in model.named_modules():
-            if isinstance(module, QModuleMixin):
+            if isinstance(module, quanto.QModuleMixin):
                 for missing in missing_keys:
                     if (
                         (name in missing or name in f"{prefix}.{missing}")
@@ -114,8 +106,7 @@ class QuantoHfQuantizer(HfQuantizer):
         """
         Check if a parameter needs to be quantized.
         """
-        if is_optimum_quanto_available():
-            from optimum.quanto import QModuleMixin
+        import quanto
 
         device_map = kwargs.get("device_map", None)
         param_device = kwargs.get("param_device", None)
@@ -128,7 +119,7 @@ class QuantoHfQuantizer(HfQuantizer):
 
         module, tensor_name = get_module_from_name(model, param_name)
         # We only quantize the weights and the bias is not quantized.
-        if isinstance(module, QModuleMixin) and "weight" in tensor_name:
+        if isinstance(module, quanto.QModuleMixin) and "weight" in tensor_name:
             # if the weights are quantized, don't need to recreate it again with `create_quantized_param`
             return not module.frozen
         else:
@@ -171,7 +162,7 @@ class QuantoHfQuantizer(HfQuantizer):
             return target_dtype
         else:
             raise ValueError(
-                "You are using `device_map='auto'` on an optimum-quanto quantized model. To automatically compute"
+                "You are using `device_map='auto'` on a quanto quantized model. To automatically compute"
                 " the appropriate device map, you should upgrade your `accelerate` library,"
                 "`pip install --upgrade accelerate` or install it from source."
             )
@@ -202,7 +193,8 @@ class QuantoHfQuantizer(HfQuantizer):
 
     @property
     def is_trainable(self, model: Optional["PreTrainedModel"] = None):
-        return True
+        return False
 
-    def is_serializable(self, safe_serialization=None):
+    @property
+    def is_serializable(self):
         return False

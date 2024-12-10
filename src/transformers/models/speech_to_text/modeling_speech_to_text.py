@@ -22,7 +22,6 @@ from torch import nn
 from torch.nn import CrossEntropyLoss
 
 from ...activations import ACT2FN
-from ...generation import GenerationMixin
 from ...modeling_attn_mask_utils import _prepare_4d_attention_mask, _prepare_4d_causal_attention_mask
 from ...modeling_outputs import (
     BaseModelOutput,
@@ -1130,7 +1129,7 @@ class Speech2TextModel(Speech2TextPreTrainedModel):
 
          >>> model = Speech2TextModel.from_pretrained("facebook/s2t-small-librispeech-asr")
          >>> feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/s2t-small-librispeech-asr")
-         >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+         >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True)
          >>> inputs = feature_extractor(
          ...     ds[0]["audio"]["array"], sampling_rate=ds[0]["audio"]["sampling_rate"], return_tensors="pt"
          ... )
@@ -1208,7 +1207,7 @@ class Speech2TextModel(Speech2TextPreTrainedModel):
     "The Speech2Text Model with a language modeling head. Can be used for summarization.",
     SPEECH_TO_TEXT_START_DOCSTRING,
 )
-class Speech2TextForConditionalGeneration(Speech2TextPreTrainedModel, GenerationMixin):
+class Speech2TextForConditionalGeneration(Speech2TextPreTrainedModel):
     base_model_prefix = "model"
     _tied_weights_keys = ["lm_head.weight"]
 
@@ -1271,7 +1270,7 @@ class Speech2TextForConditionalGeneration(Speech2TextPreTrainedModel, Generation
         >>> processor = Speech2TextProcessor.from_pretrained("facebook/s2t-small-librispeech-asr")
 
 
-        >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+        >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True)
 
         >>> inputs = processor(
         ...     ds[0]["audio"]["array"], sampling_rate=ds[0]["audio"]["sampling_rate"], return_tensors="pt"
@@ -1330,6 +1329,33 @@ class Speech2TextForConditionalGeneration(Speech2TextPreTrainedModel, Generation
             encoder_hidden_states=outputs.encoder_hidden_states,
             encoder_attentions=outputs.encoder_attentions,
         )
+
+    def prepare_inputs_for_generation(
+        self,
+        decoder_input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        head_mask=None,
+        decoder_head_mask=None,
+        cross_attn_head_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs,
+    ):
+        # cut decoder_input_ids if past is used
+        if past_key_values is not None:
+            decoder_input_ids = decoder_input_ids[:, -1:]
+
+        return {
+            "encoder_outputs": encoder_outputs,
+            "past_key_values": past_key_values,
+            "decoder_input_ids": decoder_input_ids,
+            "attention_mask": attention_mask,
+            "head_mask": head_mask,
+            "decoder_head_mask": decoder_head_mask,
+            "cross_attn_head_mask": cross_attn_head_mask,
+            "use_cache": use_cache,  # change this to avoid caching (presumably for debugging)
+        }
 
     @staticmethod
     def _reorder_cache(past_key_values, beam_idx):

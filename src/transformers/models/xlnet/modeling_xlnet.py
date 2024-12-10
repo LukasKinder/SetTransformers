@@ -26,7 +26,6 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
-from ...generation import GenerationMixin
 from ...modeling_utils import PoolerAnswerClass, PoolerEndLogits, PoolerStartLogits, PreTrainedModel, SequenceSummary
 from ...pytorch_utils import apply_chunking_to_forward
 from ...utils import (
@@ -1287,7 +1286,7 @@ class XLNetModel(XLNetPreTrainedModel):
     """,
     XLNET_START_DOCSTRING,
 )
-class XLNetLMHeadModel(XLNetPreTrainedModel, GenerationMixin):
+class XLNetLMHeadModel(XLNetPreTrainedModel):
     _tied_weights_keys = ["lm_loss.weight"]
 
     def __init__(self, config):
@@ -1308,8 +1307,6 @@ class XLNetLMHeadModel(XLNetPreTrainedModel, GenerationMixin):
         self.lm_loss = new_embeddings
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, use_mems=None, **kwargs):
-        # Overwritten -- this model has unique input preparation
-
         # Add dummy token at the end (no attention on this one)
 
         effective_batch_size = input_ids.shape[0]

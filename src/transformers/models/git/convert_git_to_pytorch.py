@@ -19,7 +19,6 @@ URL: https://github.com/microsoft/GenerativeImage2Text/tree/main"""
 import argparse
 from pathlib import Path
 
-import av
 import numpy as np
 import requests
 import torch
@@ -194,27 +193,10 @@ def prepare_img(model_name):
 
 
 def prepare_video():
-    def read_video_pyav(container, indices):
-        """
-        Decode the video with PyAV decoder.
+    from decord import VideoReader, cpu
 
-        Args:
-            container (`av.container.input.InputContainer`): PyAV container.
-            indices (`List[int]`): List of frame indices to decode.
-
-        Returns:
-            result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-        """
-        frames = []
-        container.seek(0)
-        start_index = indices[0]
-        end_index = indices[-1]
-        for i, frame in enumerate(container.decode(video=0)):
-            if i > end_index:
-                break
-            if i >= start_index and i in indices:
-                frames.append(frame)
-        return np.stack([x.to_ndarray(format="rgb24") for x in frames])
+    # set seed for reproducability
+    np.random.seed(0)
 
     def sample_frame_indices(clip_len, frame_sample_rate, seg_len):
         """
@@ -235,19 +217,16 @@ def prepare_video():
         indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
         return indices
 
-    # set seed for reproducibility
-    np.random.seed(0)
-
+    # video clip consists of 300 frames (10 seconds at 30 FPS)
     file_path = hf_hub_download(repo_id="nielsr/video-demo", filename="eating_spaghetti.mp4", repo_type="dataset")
-    with av.open(file_path) as container:
-        # sample 6 frames
-        num_frames = 6
-        indices = sample_frame_indices(
-            clip_len=num_frames, frame_sample_rate=4, seg_len=container.streams.video[0].frames
-        )
-        frames = read_video_pyav(container, indices)
+    videoreader = VideoReader(file_path, num_threads=1, ctx=cpu(0))
 
-        return frames
+    # sample 6 frames
+    videoreader.seek(0)
+    indices = sample_frame_indices(clip_len=6, frame_sample_rate=4, seg_len=len(videoreader))
+    video = videoreader.get_batch(indices).asnumpy()
+
+    return video
 
 
 @torch.no_grad()

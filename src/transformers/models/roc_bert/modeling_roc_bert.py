@@ -24,7 +24,6 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
-from ...generation import GenerationMixin
 from ...modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
@@ -1152,7 +1151,7 @@ class RoCBertForPreTraining(RoCBertPreTrainedModel):
                  ignored (masked), the loss is only computed for the tokens with labels in `[0, ...,
                  config.vocab_size]`
 
-            kwargs (`Dict[str, any]`, *optional*, defaults to *{}*):
+            kwargs (`Dict[str, any]`, optional, defaults to *{}*):
                 Used to hide legacy arguments that have been deprecated.
 
         Returns:
@@ -1404,7 +1403,7 @@ class RoCBertForMaskedLM(RoCBertPreTrainedModel):
 @add_start_docstrings(
     """RoCBert Model with a `language modeling` head on top for CLM fine-tuning.""", ROC_BERT_START_DOCSTRING
 )
-class RoCBertForCausalLM(RoCBertPreTrainedModel, GenerationMixin):
+class RoCBertForCausalLM(RoCBertPreTrainedModel):
     _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     # Copied from transformers.models.bert.modeling_bert.BertLMHeadModel.__init__ with BertLMHeadModel->RoCBertForCausalLM,Bert->RoCBert,bert->roc_bert
@@ -1552,8 +1551,6 @@ class RoCBertForCausalLM(RoCBertPreTrainedModel, GenerationMixin):
         attention_mask=None,
         **model_kwargs,
     ):
-        # Overwritten -- `input_pronunciation_ids`
-
         input_shape = input_ids.shape
 
         # if model is used as a decoder in encoder-decoder model, the decoder attention mask is created on the fly

@@ -15,7 +15,6 @@
 """Utilities to dynamically load objects from the Hub."""
 
 import filecmp
-import hashlib
 import importlib
 import importlib.util
 import os
@@ -23,11 +22,9 @@ import re
 import shutil
 import signal
 import sys
-import threading
 import typing
 import warnings
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Dict, List, Optional, Union
 
 from huggingface_hub import try_to_load_from_cache
@@ -43,7 +40,6 @@ from .utils import (
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-_HF_REMOTE_CODE_LOCK = threading.Lock()
 
 
 def init_hf_modules():
@@ -62,7 +58,7 @@ def init_hf_modules():
         importlib.invalidate_caches()
 
 
-def create_dynamic_module(name: Union[str, os.PathLike]) -> None:
+def create_dynamic_module(name: Union[str, os.PathLike]):
     """
     Creates a dynamic module in the cache directory for modules.
 
@@ -152,12 +148,7 @@ def get_imports(filename: Union[str, os.PathLike]) -> List[str]:
         content = f.read()
 
     # filter out try/except block so in custom code we can have try/except imports
-    content = re.sub(r"\s*try\s*:.*?except.*?:", "", content, flags=re.DOTALL)
-
-    # filter out imports under is_flash_attn_2_available block for avoid import issues in cpu only environment
-    content = re.sub(
-        r"if is_flash_attn[a-zA-Z0-9_]+available\(\):\s*(from flash_attn\s*.*\s*)+", "", content, flags=re.MULTILINE
-    )
+    content = re.sub(r"\s*try\s*:\s*.*?\s*except\s*.*?:", "", content, flags=re.MULTILINE | re.DOTALL)
 
     # Imports of the form `import xxx`
     imports = re.findall(r"^\s*import\s+(\S+)\s*$", content, flags=re.MULTILINE)
@@ -184,15 +175,8 @@ def check_imports(filename: Union[str, os.PathLike]) -> List[str]:
     for imp in imports:
         try:
             importlib.import_module(imp)
-        except ImportError as exception:
-            logger.warning(f"Encountered exception while importing {imp}: {exception}")
-            # Some packages can fail with an ImportError because of a dependency issue.
-            # This check avoids hiding such errors.
-            # See https://github.com/huggingface/transformers/issues/33604
-            if "No module named" in str(exception):
-                missing_packages.append(imp)
-            else:
-                raise
+        except ImportError:
+            missing_packages.append(imp)
 
     if len(missing_packages) > 0:
         raise ImportError(
@@ -203,21 +187,13 @@ def check_imports(filename: Union[str, os.PathLike]) -> List[str]:
     return get_relative_imports(filename)
 
 
-def get_class_in_module(
-    class_name: str,
-    module_path: Union[str, os.PathLike],
-    *,
-    force_reload: bool = False,
-) -> typing.Type:
+def get_class_in_module(class_name: str, module_path: Union[str, os.PathLike]) -> typing.Type:
     """
     Import a module on the cache directory for modules and extract a class from it.
 
     Args:
         class_name (`str`): The name of the class to import.
         module_path (`str` or `os.PathLike`): The path to the module to import.
-        force_reload (`bool`, *optional*, defaults to `False`):
-            Whether to reload the dynamic module from file if it already exists in `sys.modules`.
-            Otherwise, the module is only reloaded if the file has changed.
 
     Returns:
         `typing.Type`: The class looked for.
@@ -226,30 +202,15 @@ def get_class_in_module(
     if name.endswith(".py"):
         name = name[:-3]
     name = name.replace(os.path.sep, ".")
-    module_file: Path = Path(HF_MODULES_CACHE) / module_path
-    with _HF_REMOTE_CODE_LOCK:
-        if force_reload:
-            sys.modules.pop(name, None)
-            importlib.invalidate_caches()
-        cached_module: Optional[ModuleType] = sys.modules.get(name)
-        module_spec = importlib.util.spec_from_file_location(name, location=module_file)
-
-        # Hash the module file and all its relative imports to check if we need to reload it
-        module_files: List[Path] = [module_file] + sorted(map(Path, get_relative_import_files(module_file)))
-        module_hash: str = hashlib.sha256(b"".join(bytes(f) + f.read_bytes() for f in module_files)).hexdigest()
-
-        module: ModuleType
-        if cached_module is None:
-            module = importlib.util.module_from_spec(module_spec)
-            # insert it into sys.modules before any loading begins
-            sys.modules[name] = module
-        else:
-            module = cached_module
-        # reload in both cases, unless the module is already imported and the hash hits
-        if getattr(module, "__transformers_module_hash__", "") != module_hash:
-            module_spec.loader.exec_module(module)
-            module.__transformers_module_hash__ = module_hash
-        return getattr(module, class_name)
+    module_spec = importlib.util.spec_from_file_location(name, location=Path(HF_MODULES_CACHE) / module_path)
+    module = sys.modules.get(name)
+    if module is None:
+        module = importlib.util.module_from_spec(module_spec)
+        # insert it into sys.modules before any loading begins
+        sys.modules[name] = module
+    # reload in both cases
+    module_spec.loader.exec_module(module)
+    return getattr(module, class_name)
 
 
 def get_cached_module_file(
@@ -550,7 +511,7 @@ def get_class_from_dynamic_module(
         local_files_only=local_files_only,
         repo_type=repo_type,
     )
-    return get_class_in_module(class_name, final_module, force_reload=force_download)
+    return get_class_in_module(class_name, final_module)
 
 
 def custom_object_save(obj: Any, folder: Union[str, os.PathLike], config: Optional[Dict] = None) -> List[str]:

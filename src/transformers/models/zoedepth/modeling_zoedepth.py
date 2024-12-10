@@ -185,13 +185,12 @@ class ZoeDepthFeatureFusionStage(nn.Module):
         hidden_states = hidden_states[::-1]
 
         fused_hidden_states = []
-        fused_hidden_state = None
-        for hidden_state, layer in zip(hidden_states, self.layers):
-            if fused_hidden_state is None:
-                # first layer only uses the last hidden_state
-                fused_hidden_state = layer(hidden_state)
-            else:
-                fused_hidden_state = layer(fused_hidden_state, hidden_state)
+        # first layer only uses the last hidden_state
+        fused_hidden_state = self.layers[0](hidden_states[0])
+        fused_hidden_states.append(fused_hidden_state)
+        # looping from the last layer to the second
+        for hidden_state, layer in zip(hidden_states[1:], self.layers[1:]):
+            fused_hidden_state = layer(fused_hidden_state, hidden_state)
             fused_hidden_states.append(fused_hidden_state)
 
         return fused_hidden_states
@@ -335,7 +334,7 @@ class ZoeDepthNeck(nn.Module):
                 List of hidden states from the backbone.
         """
         if not isinstance(hidden_states, (tuple, list)):
-            raise TypeError("hidden_states should be a tuple or list of tensors")
+            raise ValueError("hidden_states should be a tuple or list of tensors")
 
         if len(hidden_states) != len(self.config.neck_hidden_sizes):
             raise ValueError("The number of hidden states should be equal to the number of neck hidden sizes.")
@@ -1339,18 +1338,20 @@ class ZoeDepthForDepthEstimation(ZoeDepthPreTrainedModel):
 
         >>> with torch.no_grad():
         ...     outputs = model(**inputs)
+        ...     predicted_depth = outputs.predicted_depth
 
         >>> # interpolate to original size
-        >>> post_processed_output = image_processor.post_process_depth_estimation(
-        ...     outputs,
-        ...     source_sizes=[(image.height, image.width)],
+        >>> prediction = torch.nn.functional.interpolate(
+        ...     predicted_depth.unsqueeze(1),
+        ...     size=image.size[::-1],
+        ...     mode="bicubic",
+        ...     align_corners=False,
         ... )
 
         >>> # visualize the prediction
-        >>> predicted_depth = post_processed_output[0]["predicted_depth"]
-        >>> depth = predicted_depth * 255 / predicted_depth.max()
-        >>> depth = depth.detach().cpu().numpy()
-        >>> depth = Image.fromarray(depth.astype("uint8"))
+        >>> output = prediction.squeeze().cpu().numpy()
+        >>> formatted = (output * 255 / np.max(output)).astype("uint8")
+        >>> depth = Image.fromarray(formatted)
         ```"""
         loss = None
         if labels is not None:

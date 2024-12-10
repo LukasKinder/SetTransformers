@@ -28,7 +28,6 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
-from ...generation import GenerationMixin
 from ...modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa, _prepare_4d_causal_attention_mask_for_sdpa
 from ...modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
@@ -476,6 +475,7 @@ class GPT2SdpaAttention(GPT2Attention):
         hidden_states: Optional[Tuple[torch.FloatTensor]],
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
+        set_attention_mask = None,
         head_mask: Optional[torch.FloatTensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
@@ -542,6 +542,9 @@ class GPT2SdpaAttention(GPT2Attention):
         # in SDPA to support both torch.compile's dynamic shapes and full graph options. An inline conditional prevents dynamic shapes from compiling.
         is_causal = True if attention_mask is None and q_len > 1 and not is_cross_attention else False
 
+        if set_attention_mask != None and query.shape[2] != 1:
+            attention_mask = set_attention_mask.unsqueeze(1)
+
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query,
             key,
@@ -604,6 +607,7 @@ class GPT2Block(nn.Module):
         hidden_states: Optional[Tuple[torch.FloatTensor]],
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
+        set_attention_mask = None,
         head_mask: Optional[torch.FloatTensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
@@ -611,11 +615,13 @@ class GPT2Block(nn.Module):
         output_attentions: Optional[bool] = False,
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
         residual = hidden_states
+
         hidden_states = self.ln_1(hidden_states)
         attn_outputs = self.attn(
             hidden_states,
             layer_past=layer_past,
             attention_mask=attention_mask,
+            set_attention_mask = set_attention_mask,
             head_mask=head_mask,
             use_cache=use_cache,
             output_attentions=output_attentions,
@@ -840,7 +846,7 @@ PARALLELIZE_DOCSTRING = r"""
     it will evenly distribute blocks across all devices.
 
     Args:
-        device_map (`Dict[int, list]`, *optional*):
+        device_map (`Dict[int, list]`, optional, defaults to None):
             A dictionary that maps attention modules to devices. Note that the embedding module and LMHead are always
             automatically mapped to the first device (for esoteric reasons). That means that the first device should
             have fewer attention modules mapped to it than other devices. For reference, the gpt2 models have the
@@ -890,8 +896,6 @@ DEPARALLELIZE_DOCSTRING = r"""
     GPT2_START_DOCSTRING,
 )
 class GPT2Model(GPT2PreTrainedModel):
-    _supports_param_buffer_assignment = False
-
     def __init__(self, config):
         super().__init__(config)
 
@@ -981,6 +985,8 @@ class GPT2Model(GPT2PreTrainedModel):
         input_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
+        set_attention_mask = None,
+        set_pos_encoding = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -1026,6 +1032,9 @@ class GPT2Model(GPT2PreTrainedModel):
             position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
             position_ids = position_ids.unsqueeze(0)
 
+        if set_pos_encoding != None:
+            position_ids = set_pos_encoding # just overwrite them (?)
+
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
         position_embeds = self.wpe(position_ids)
@@ -1033,18 +1042,18 @@ class GPT2Model(GPT2PreTrainedModel):
 
         # Attention mask.
         _use_sdpa = self._attn_implementation == "sdpa" and output_attentions is False and head_mask is None
-        attention_mask = attention_mask.view(batch_size, -1) if attention_mask is not None else None
-        if self._attn_implementation == "flash_attention_2":
-            attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
-        elif _use_sdpa:
-            attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
-                attention_mask=attention_mask,
-                input_shape=(batch_size, input_shape[-1]),
-                inputs_embeds=inputs_embeds,
-                past_key_values_length=past_length,
-            )
-        else:
-            if attention_mask is not None:
+        if attention_mask is not None:
+            attention_mask = attention_mask.view(batch_size, -1)
+            if self._attn_implementation == "flash_attention_2":
+                attention_mask = attention_mask if 0 in attention_mask else None
+            elif _use_sdpa:
+                attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
+                    attention_mask=attention_mask,
+                    input_shape=(batch_size, input_shape[-1]),
+                    inputs_embeds=inputs_embeds,
+                    past_key_values_length=past_length,
+                )
+            else:
                 # We create a 3D attention mask from a 2D tensor mask.
                 # Sizes are [batch_size, 1, 1, to_seq_length]
                 # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
@@ -1101,8 +1110,7 @@ class GPT2Model(GPT2PreTrainedModel):
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
-        for i in range(len(self.h)):
-            block, layer_past = self.h[i], past_key_values[i]
+        for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             # Model parallel
             if self.model_parallel:
                 torch.cuda.set_device(hidden_states.device)
@@ -1134,6 +1142,7 @@ class GPT2Model(GPT2PreTrainedModel):
                     hidden_states,
                     layer_past=layer_past,
                     attention_mask=attention_mask,
+                    set_attention_mask = set_attention_mask,
                     head_mask=head_mask[i],
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
@@ -1186,7 +1195,7 @@ class GPT2Model(GPT2PreTrainedModel):
     """,
     GPT2_START_DOCSTRING,
 )
-class GPT2LMHeadModel(GPT2PreTrainedModel, GenerationMixin):
+class GPT2LMHeadModel(GPT2PreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
@@ -1238,6 +1247,67 @@ class GPT2LMHeadModel(GPT2PreTrainedModel, GenerationMixin):
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
 
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+        token_type_ids = kwargs.get("token_type_ids", None)
+        # Omit tokens covered by past_key_values
+        if past_key_values:
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids[:, -input_ids.shape[1] :]
+
+        attention_mask = kwargs.get("attention_mask", None)
+        position_ids = kwargs.get("position_ids", None)
+
+        set_attention_mask = kwargs.get("set_attention_mask", None)
+        set_pos_encoding = kwargs.get("set_pos_encoding", None)
+
+        if attention_mask is not None and position_ids is None:
+
+            if set_pos_encoding == None:
+                    # ORIGINAL VERSION:
+                    # create position_ids on the fly for batch generation
+                    position_ids = attention_mask.long().cumsum(-1) - 1
+                    position_ids.masked_fill_(attention_mask == 0, 1)
+            else:
+                # VERSION WITH SET ENCODING :
+                current_len_tokens = attention_mask.shape[1]
+                len_prompt = set_pos_encoding.shape[1]
+                last_originals = set_pos_encoding[:, -1 :]
+                range_tensor = torch.arange(start = 1, end = current_len_tokens - len_prompt+1).unsqueeze(0)
+                last_originals = last_originals + range_tensor.to(last_originals.device)
+                position_ids = torch.cat((set_pos_encoding, last_originals), dim=1)
+
+            if past_key_values:
+                position_ids = position_ids[:,-1:]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "position_ids": position_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+                "set_attention_mask": set_attention_mask
+            }
+        )
+
+        return model_inputs
+
     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
@@ -1249,6 +1319,8 @@ class GPT2LMHeadModel(GPT2PreTrainedModel, GenerationMixin):
         input_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
+        set_attention_mask: Optional[torch.FloatTensor] = None,
+        set_pos_encoding: Optional[torch.FloatTensor] = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -1275,6 +1347,8 @@ class GPT2LMHeadModel(GPT2PreTrainedModel, GenerationMixin):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
+            set_attention_mask = set_attention_mask,
+            set_pos_encoding = set_pos_encoding,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
@@ -1341,7 +1415,7 @@ input sequence).
 """,
     GPT2_START_DOCSTRING,
 )
-class GPT2DoubleHeadsModel(GPT2PreTrainedModel, GenerationMixin):
+class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
@@ -1396,6 +1470,52 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel, GenerationMixin):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+
+    def prepare_inputs_for_generation(self, input_ids, inputs_embeds=None, past_key_values=None, **kwargs):
+        token_type_ids = kwargs.get("token_type_ids", None)
+        # Omit tokens covered by past_key_values
+        if past_key_values:
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids[:, -input_ids.shape[1] :]
+
+        attention_mask = kwargs.get("attention_mask", None)
+        position_ids = kwargs.get("position_ids", None)
+
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+        else:
+            position_ids = None
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids.contiguous()}
+
+        model_inputs.update(
+            {
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "position_ids": position_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+            }
+        )
+        return model_inputs
 
     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=GPT2DoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)

@@ -42,7 +42,6 @@ except OptionalDependencyNotAvailable:
 else:
     _import_structure["modeling_qwen2"] = [
         "Qwen2ForCausalLM",
-        "Qwen2ForQuestionAnswering",
         "Qwen2Model",
         "Qwen2PreTrainedModel",
         "Qwen2ForSequenceClassification",
@@ -70,7 +69,6 @@ if TYPE_CHECKING:
     else:
         from .modeling_qwen2 import (
             Qwen2ForCausalLM,
-            Qwen2ForQuestionAnswering,
             Qwen2ForSequenceClassification,
             Qwen2ForTokenClassification,
             Qwen2Model,

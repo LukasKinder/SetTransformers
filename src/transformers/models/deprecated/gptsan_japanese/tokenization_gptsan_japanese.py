@@ -236,6 +236,19 @@ class GPTSanJapaneseTokenizer(PreTrainedTokenizer):
         text = "".join(words)
         return text
 
+    @property
+    def default_chat_template(self):
+        """
+        A simple chat template that adds standard BOS, SEP and EOS tokens between messages while discarding role
+        information.
+        """
+        return (
+            "{% for message in messages %}"
+            "{% if not loop.first %}{{ bos_token}}{% endif %}"
+            "{{ sep_token }}{{ message.content }} {{ eos_token }}"
+            "{% endfor %}"
+        )
+
     def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
         index = 0
         if os.path.isdir(save_directory):
@@ -365,7 +378,7 @@ class GPTSanJapaneseTokenizer(PreTrainedTokenizer):
         )
 
 
-class SubWordJapaneseTokenizer:
+class SubWordJapaneseTokenizer(object):
     """
     This tokenizer is based on GPTNeoXJapaneseTokenizer and has the following modifications
     - Decoding byte0~byte255 tokens correctly

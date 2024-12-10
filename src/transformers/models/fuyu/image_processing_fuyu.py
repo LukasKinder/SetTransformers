@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Union
 
 import numpy as np
 
-from ...image_processing_utils import BaseImageProcessor, BatchFeature, get_size_dict
+from ...image_processing_utils import BaseImageProcessor, BatchFeature
 from ...image_transforms import (
     pad,
     resize,
@@ -39,7 +39,6 @@ from ...image_utils import (
 )
 from ...utils import (
     TensorType,
-    filter_out_non_signature_kwargs,
     is_torch_available,
     is_torch_device,
     is_torch_dtype,
@@ -262,6 +261,24 @@ class FuyuImageProcessor(BaseImageProcessor):
         self.do_rescale = do_rescale
         self.rescale_factor = rescale_factor
         self.patch_size = patch_size if patch_size is not None else {"height": 30, "width": 30}
+        self._valid_processor_keys = [
+            "images",
+            "do_resize",
+            "size",
+            "resample",
+            "do_pad",
+            "padding_value",
+            "padding_mode",
+            "do_normalize",
+            "image_mean",
+            "image_std",
+            "do_rescale",
+            "rescale_factor",
+            "patch_size",
+            "return_tensors",
+            "data_format",
+            "input_data_format",
+        ]
 
     def resize(
         self,
@@ -359,7 +376,6 @@ class FuyuImageProcessor(BaseImageProcessor):
         )
         return padded_image
 
-    @filter_out_non_signature_kwargs()
     def preprocess(
         self,
         images,
@@ -475,7 +491,6 @@ class FuyuImageProcessor(BaseImageProcessor):
             input_data_format = infer_channel_dimension_format(batch_images[0][0])
 
         original_image_sizes = [get_image_size(images[0], channel_dim=input_data_format) for images in batch_images]
-        size = get_size_dict(size)  # for BC
 
         if do_resize:
             batch_images = [

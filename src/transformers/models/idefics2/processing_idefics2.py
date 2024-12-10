@@ -16,20 +16,13 @@
 Processor class for IDEFICS2.
 """
 
-from itertools import accumulate
 from typing import TYPE_CHECKING, List, Optional, Union
 
 from ...feature_extraction_utils import BatchFeature
 from ...image_utils import ImageInput, is_valid_image, load_image
-from ...processing_utils import (
-    ImagesKwargs,
-    ProcessingKwargs,
-    ProcessorMixin,
-    Unpack,
-    _validate_images_text_input_order,
-)
-from ...tokenization_utils_base import AddedToken, TextInput
-from ...utils import logging
+from ...processing_utils import ProcessorMixin
+from ...tokenization_utils_base import AddedToken, BatchEncoding, PaddingStrategy, TextInput, TruncationStrategy
+from ...utils import TensorType, logging
 
 
 if TYPE_CHECKING:
@@ -45,23 +38,6 @@ def is_url(val) -> bool:
 
 def is_image_or_image_url(elem):
     return is_url(elem) or is_valid_image(elem)
-
-
-class Idefics2ImagesKwargs(ImagesKwargs, total=False):
-    image_seq_len: Optional[int]
-
-
-class Idefics2ProcessorKwargs(ProcessingKwargs, total=False):
-    images_kwargs: Idefics2ImagesKwargs
-
-    _defaults = {
-        "text_kwargs": {
-            "add_special_tokens": True,
-            "padding": False,
-            "is_split_into_words": False,
-        },
-        "images_kwargs": {},
-    }
 
 
 class Idefics2Processor(ProcessorMixin):
@@ -95,18 +71,15 @@ class Idefics2Processor(ProcessorMixin):
         if tokenizer is None:
             raise ValueError("You need to specify a `tokenizer`.")
 
-        if not hasattr(tokenizer, "image_token"):
-            self.fake_image_token = AddedToken("<fake_token_around_image>", normalized=False, special=True)
-            self.image_token = AddedToken("<image>", normalized=False, special=True)
-            tokens_to_add = {"additional_special_tokens": [self.fake_image_token, self.image_token]}
-            tokenizer.add_special_tokens(tokens_to_add)
-        else:
-            self.fake_image_token = tokenizer.image_boundary_token
-            self.image_token = tokenizer.image_token
-
+        self.fake_image_token = AddedToken("<fake_token_around_image>", normalized=False, special=True)
+        self.image_token = AddedToken("<image>", normalized=False, special=True)
         self.end_of_utterance_token = AddedToken("<end_of_utterance>", normalized=False, special=True)
-        tokenizer.add_special_tokens({"additional_special_tokens": [self.end_of_utterance_token]})
         self.image_seq_len = image_seq_len
+
+        tokens_to_add = {
+            "additional_special_tokens": [self.fake_image_token, self.image_token, self.end_of_utterance_token]
+        }
+        tokenizer.add_special_tokens(tokens_to_add)
 
         super().__init__(image_processor, tokenizer, chat_template=chat_template)
 
@@ -124,12 +97,16 @@ class Idefics2Processor(ProcessorMixin):
 
     def __call__(
         self,
-        images: Union[ImageInput, List[ImageInput], List[List[ImageInput]]] = None,
         text: Union[TextInput, "PreTokenizedInput", List[TextInput], List["PreTokenizedInput"]] = None,
-        audio=None,
-        videos=None,
-        **kwargs: Unpack[Idefics2ProcessorKwargs],
-    ) -> BatchFeature:
+        images: Union[ImageInput, List[ImageInput], List[List[ImageInput]]] = None,
+        image_seq_len: Optional[int] = None,
+        padding: Union[bool, str, PaddingStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy] = None,
+        max_length: Optional[int] = None,
+        is_split_into_words: bool = False,
+        add_special_tokens: bool = True,
+        return_tensors: Optional[Union[str, TensorType]] = None,
+    ) -> BatchEncoding:
         """
         Processes the input prompts and returns a BatchEncoding.
 
@@ -153,7 +130,7 @@ class Idefics2Processor(ProcessorMixin):
         ...     "<image>In this image, we see",
         ...     "bla bla bla<image>",
         ... ]
-        >>> outputs = processor(images=images, text=text, return_tensors="pt", padding=True)
+        >>> outputs = processor(text=text, images=images, return_tensors="pt", padding=True)
         >>> input_ids = outputs.input_ids
         >>> input_tokens = processor.tokenizer.batch_decode(input_ids)
         >>> print(input_tokens)
@@ -161,9 +138,6 @@ class Idefics2Processor(ProcessorMixin):
         ```
 
         Args:
-            images (`PIL.Image.Image`, `np.ndarray`, `torch.Tensor`, `List[PIL.Image.Image]`, `List[np.ndarray]`, `List[torch.Tensor]`, *optional*):
-                The image or batch of images to be prepared. Each image can be a PIL image, NumPy array or PyTorch
-                tensor. If is of type `List[ImageInput]`, it's assumed that this is for a single prompt i.e. of batch size 1.
             text (`Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]]`, *optional*):
                 The sequence or batch of sequences to be encoded. Each sequence can be a string or a list of strings
                 (pretokenized string). If the sequences are provided as list of strings (pretokenized), you must set
@@ -171,22 +145,27 @@ class Idefics2Processor(ProcessorMixin):
 
                 Wherever an image token, `<image>` is encountered it is expanded to
                 `<fake_token_around_image>` + `<image>` * `image_seq_len` * <fake_token_around_image>`.
+            images (`PIL.Image.Image`, `np.ndarray`, `torch.Tensor`, `List[PIL.Image.Image]`, `List[np.ndarray]`, `List[torch.Tensor]`, *optional*):
+                The image or batch of images to be prepared. Each image can be a PIL image, NumPy array or PyTorch
+                tensor. If is of type `List[ImageInput]`, it's assumed that this is for a single prompt i.e. of batch size 1.
+            image_seq_len (`int`, *optional*):
+                The length of the image sequence. If not provided, the default value is used.
+            padding (`Union[bool, str, PaddingStrategy]`, *optional*, defaults to `False`):
+                Padding strategy applied to the input ids. See [`PreTrainedTokenizerFast.pad`] for more information.
+            truncation (`Union[bool, str, TruncationStrategy]`, *optional*):
+                Truncation strategy applied to the input ids. See [`PreTrainedTokenizerFast.truncate`] for more information.
+            max_length (`int`, *optional*):
+                Maximum length of the returned list and optionally padding/truncation length. See
+                [`PreTrainedTokenizerFast.__call__`] for more information.
+            is_split_into_words (`bool`, *optional*, defaults to `False`):
+                Whether the input text is split into words or not. If set to `True`, the tokenizer will skip the
+                tokenization process and assume the input is already tokenized.
+            add_special_tokens (`bool`, *optional*, defaults to `True`):
+                Whether to add special tokens or not. See [`PreTrainedTokenizerFast.__call__`] for more information.
             return_tensors (`Union[str, TensorType]`, *optional*):
                 If set, will return tensors of a particular framework. See [`PreTrainedTokenizerFast.__call__`] for more
                 information.
-
         """
-        if text is None and images is None:
-            raise ValueError("You must provide either `text` or `images`.")
-        # check if images and text inputs are reversed for BC
-        images, text = _validate_images_text_input_order(images, text)
-
-        output_kwargs = self._merge_kwargs(
-            Idefics2ProcessorKwargs,
-            tokenizer_init_kwargs=self.tokenizer.init_kwargs,
-            **kwargs,
-        )
-        image_seq_len = output_kwargs["images_kwargs"].pop("image_seq_len", None)
         image_seq_len = image_seq_len if image_seq_len is not None else self.image_seq_len
 
         n_images_in_text = []
@@ -215,28 +194,22 @@ class Idefics2Processor(ProcessorMixin):
                 sample = sample.replace(f"{fake_image_token}{fake_image_token}", f"{fake_image_token}")
                 prompt_strings.append(sample)
 
-            text_inputs = self.tokenizer(prompt_strings, **output_kwargs["text_kwargs"])
+            text_inputs = self.tokenizer(
+                text=prompt_strings,
+                add_special_tokens=add_special_tokens,
+                padding=padding,
+                truncation=truncation,
+                max_length=max_length,
+                is_split_into_words=is_split_into_words,
+                return_tensors=return_tensors,
+            )
             inputs.update(text_inputs)
 
         if images is not None:
             if is_image_or_image_url(images):
                 images = [[images]]
             elif isinstance(images, list) and is_image_or_image_url(images[0]):
-                if text is not None:
-                    if sum(n_images_in_text) != len(images):
-                        raise ValueError(
-                            f"The total number of {image_token} tokens in the prompts should be the same as the number of images passed."
-                            f" Found {sum(n_images_in_text)} {image_token} tokens and {len(images)} images."
-                        )
-                    # Reorganize the images to match the prompts
-                    cumsum_images_in_text = [0] + list(accumulate(n_images_in_text))
-                    images = [
-                        images[cumsum_images_in_text[i] : cumsum_images_in_text[i + 1]]
-                        for i in range(len(n_images_in_text))
-                    ]
-                else:
-                    images = [images]
-
+                images = [images]
             elif (
                 not isinstance(images, list)
                 and not isinstance(images[0], list)
@@ -254,7 +227,7 @@ class Idefics2Processor(ProcessorMixin):
 
             # Load images if they are URLs
             images = [[load_image(im) for im in sample] for sample in images]
-            image_inputs = self.image_processor(images, **output_kwargs["images_kwargs"])
+            image_inputs = self.image_processor(images, return_tensors=return_tensors)
             inputs.update(image_inputs)
 
         return inputs
@@ -278,3 +251,60 @@ class Idefics2Processor(ProcessorMixin):
         tokenizer_input_names = self.tokenizer.model_input_names
         image_processor_input_names = self.image_processor.model_input_names
         return list(dict.fromkeys(tokenizer_input_names + image_processor_input_names))
+
+    @property
+    def default_chat_template(self):
+        """
+        This template formats inputs in the form of a chat history. For each message in the chat history:
+        * the template will output the role of the speaker followed by the content of the message.
+        * content can be a single string or a list of strings and images.
+        * If the content element is an image, the template will output a sequence of <image> tokens and <fake_token_around_image> token before and after each image
+        * The template will output an <end_of_utterance> token at the end of each message.
+
+        Example:
+
+        ```python
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What’s in this image?"},
+                {"type": "image"},
+                {"type": "image"},
+                ],
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "This picture depicts Idefix, the dog of Obelix in Asterix and Obelix. Idefix is running on the ground."},]
+        }]
+        ```
+
+        Will create outputs like:
+        ```
+        User: What is in this Image?<image><image><end_of_utterance>
+        Assistant: This picture depicts Idefix, the dog of Obelix in Asterix and Obelix. Idefix is running on the ground.<end_of_utterance>
+        ```
+        """
+        # fmt: off
+        return (
+            "{% for message in messages %}"
+                "{{message['role'].capitalize()}}"
+                "{% if message['content'][0]['type'] == 'image' %}"
+                    "{{':'}}"
+                "{% else %}"
+                    "{{': '}}"
+                "{% endif %}"
+                "{% for line in message['content'] %}"
+                    "{% if line['type'] == 'text' %}"
+                        "{{line['text']}}"
+                    "{% elif line['type'] == 'image' %}"
+                        "{{ '<image>' }}"
+                    "{% endif %}"
+                "{% endfor %}"
+                "<end_of_utterance>\n"
+            "{% endfor %}"
+
+            "{% if add_generation_prompt %}"
+                "{{ 'Assistant:' }}"
+            "{% endif %}"
+        )
+        # fmt: on

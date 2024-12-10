@@ -15,7 +15,7 @@
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
-from ..auto import CONFIG_MAPPING, AutoConfig
+from ..auto import CONFIG_MAPPING
 
 
 logger = logging.get_logger(__name__)
@@ -51,10 +51,6 @@ class VideoLlavaConfig(PretrainedConfig):
             Can be either "full" to select all features or "default" to select features without `CLS`.
         vision_feature_layer (`int`, *optional*, defaults to -2):
             The index of the layer to select the vision feature.
-        image_seq_length (`int`, *optional*, defaults to 256):
-            Sequence length of one image embedding.
-        video_seq_length (`int`, *optional*, defaults to 2056):
-            Sequence length of one video embedding.
 
     Example:
 
@@ -78,7 +74,7 @@ class VideoLlavaConfig(PretrainedConfig):
     ```"""
 
     model_type = "video_llava"
-    sub_configs = {"text_config": AutoConfig, "vision_config": AutoConfig}
+    is_composition = False
 
     def __init__(
         self,
@@ -90,8 +86,6 @@ class VideoLlavaConfig(PretrainedConfig):
         projector_hidden_act="gelu",
         vision_feature_select_strategy="default",
         vision_feature_layer=-2,
-        image_seq_length=256,
-        video_seq_length=2056,
         **kwargs,
     ):
         self.ignore_index = ignore_index
@@ -100,8 +94,6 @@ class VideoLlavaConfig(PretrainedConfig):
         self.projector_hidden_act = projector_hidden_act
         self.vision_feature_select_strategy = vision_feature_select_strategy
         self.vision_feature_layer = vision_feature_layer
-        self.image_seq_length = image_seq_length
-        self.video_seq_length = video_seq_length
 
         self.vision_config = vision_config
 

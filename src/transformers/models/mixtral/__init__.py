@@ -33,7 +33,6 @@ except OptionalDependencyNotAvailable:
 else:
     _import_structure["modeling_mixtral"] = [
         "MixtralForCausalLM",
-        "MixtralForQuestionAnswering",
         "MixtralModel",
         "MixtralPreTrainedModel",
         "MixtralForSequenceClassification",
@@ -52,7 +51,6 @@ if TYPE_CHECKING:
     else:
         from .modeling_mixtral import (
             MixtralForCausalLM,
-            MixtralForQuestionAnswering,
             MixtralForSequenceClassification,
             MixtralForTokenClassification,
             MixtralModel,

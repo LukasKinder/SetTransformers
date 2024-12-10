@@ -232,8 +232,6 @@ class RagPreTrainedModel(PreTrainedModel):
 
     config_class = RagConfig
     base_model_prefix = "rag"
-    _supports_flash_attn_2 = True
-    _supports_sdpa = True
 
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
@@ -508,12 +506,16 @@ class RagModel(RagPreTrainedModel):
         if question_encoder is None:
             from ..auto.modeling_auto import AutoModel
 
-            question_encoder = AutoModel.from_config(config.question_encoder)
+            question_encoder = AutoModel.from_config(
+                config.question_encoder, attn_implementation=config._attn_implementation
+            )
 
         if generator is None:
             from ..auto.modeling_auto import AutoModelForSeq2SeqLM
 
-            generator = AutoModelForSeq2SeqLM.from_config(config.generator)
+            generator = AutoModelForSeq2SeqLM.from_config(
+                config.generator, attn_implementation=config._attn_implementation
+            )
 
         self.retriever = retriever
         if self.retriever is not None:
@@ -790,7 +792,7 @@ class RagSequenceForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
+        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
              Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:
@@ -1170,8 +1172,6 @@ class RagTokenForGeneration(RagPreTrainedModel):
         n_docs=None,
         **kwargs,
     ):
-        # Overwritten -- `do_marginalize` is explicitly set in the output
-
         if past_key_values is not None:
             # if past is defined use only last decoder_input_ids
             decoder_input_ids = decoder_input_ids[:, -1:]
@@ -1261,7 +1261,7 @@ class RagTokenForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
+        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
             Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:

@@ -1443,13 +1443,13 @@ class TFGroupViTMainLayer(keras.layers.Layer):
         super().__init__(**kwargs)
 
         if not isinstance(config.text_config, GroupViTTextConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.text_config is expected to be of type GroupViTTextConfig but is of type"
                 f" {type(config.text_config)}."
             )
 
         if not isinstance(config.vision_config, GroupViTVisionConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.vision_config is expected to be of type GroupViTVisionConfig but is of type"
                 f" {type(config.vision_config)}."
             )

@@ -25,7 +25,6 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
-from ...generation import GenerationMixin
 from ...modeling_utils import PreTrainedModel
 from ...utils import (
     ModelOutput,
@@ -752,7 +751,7 @@ class RwkvModel(RwkvPreTrainedModel):
     """,
     RWKV_START_DOCSTRING,
 )
-class RwkvForCausalLM(RwkvPreTrainedModel, GenerationMixin):
+class RwkvForCausalLM(RwkvPreTrainedModel):
     _tied_weights_keys = ["head.weight"]
 
     def __init__(self, config):
@@ -769,9 +768,7 @@ class RwkvForCausalLM(RwkvPreTrainedModel, GenerationMixin):
     def set_output_embeddings(self, new_embeddings):
         self.head = new_embeddings
 
-    def prepare_inputs_for_generation(self, input_ids, state=None, inputs_embeds=None, use_cache=None, **kwargs):
-        # Overwritten -- this model uses `state`, but doesn't have a cache (`past_key_values`)
-
+    def prepare_inputs_for_generation(self, input_ids, state=None, inputs_embeds=None, **kwargs):
         # only last token for inputs_ids if the state is passed along.
         if state is not None:
             input_ids = input_ids[:, -1].unsqueeze(-1)
@@ -783,7 +780,6 @@ class RwkvForCausalLM(RwkvPreTrainedModel, GenerationMixin):
             model_inputs = {"input_ids": input_ids}
 
         model_inputs["state"] = state
-        model_inputs["use_cache"] = use_cache
         return model_inputs
 
     @add_start_docstrings_to_model_forward(RWKV_INPUTS_DOCSTRING)

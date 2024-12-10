@@ -200,7 +200,7 @@ name_to_url = {
 
 
 def get_original_pixel_values(image):
-    class CenterPadding:
+    class CenterPadding(object):
         def __init__(self, multiple):
             super().__init__()
             self.multiple = multiple

@@ -38,7 +38,6 @@ from ...utils import (
     is_flash_attn_greater_or_equal_2_10,
     logging,
     replace_return_docstrings,
-    torch_int,
 )
 from .configuration_siglip import SiglipConfig, SiglipTextConfig, SiglipVisionConfig
 
@@ -216,19 +215,19 @@ class SiglipOutput(ModelOutput):
     Args:
         loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
-        logits_per_image (`torch.FloatTensor` of shape `(image_batch_size, text_batch_size)`):
+        logits_per_image:(`torch.FloatTensor` of shape `(image_batch_size, text_batch_size)`):
             The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
-        logits_per_text (`torch.FloatTensor` of shape `(text_batch_size, image_batch_size)`):
+        logits_per_text:(`torch.FloatTensor` of shape `(text_batch_size, image_batch_size)`):
             The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
             similarity scores.
-        text_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
+        text_embeds(`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of [`SiglipTextModel`].
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
+        image_embeds(`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of [`SiglipVisionModel`].
-        text_model_output (`BaseModelOutputWithPooling`):
+        text_model_output(`BaseModelOutputWithPooling`):
             The output of the [`SiglipTextModel`].
-        vision_model_output (`BaseModelOutputWithPooling`):
+        vision_model_output(`BaseModelOutputWithPooling`):
             The output of the [`SiglipVisionModel`].
     """
 
@@ -270,46 +269,45 @@ class SiglipVisionEmbeddings(nn.Module):
 
     def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
         """
-        This method allows to interpolate the pre-trained position encodings, to be able to use the model on higher resolution
-        images. This method is also adapted to support torch.jit tracing and no class embeddings.
+        This method is an adapted method for SigLIP (due to SigLIP not having class embedding unlike other ViTs)
+        that allows the model to interpolate the pre-trained position encodings such that it can be usable on
+        higher resolution images.
 
-        Adapted from:
-        - https://github.com/facebookresearch/dino/blob/de9ee3df6cf39fac952ab558447af1fa1365362a/vision_transformer.py#L174-L194, and
-        - https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/models/vision_transformer.py#L179-L211
+        Source:
+        https://github.com/facebookresearch/dino/blob/de9ee3df6cf39fac952ab558447af1fa1365362a/vision_transformer.py#L174
         """
-
+        position_embeddings = self.position_embedding.weight.unsqueeze(0)
         num_patches = embeddings.shape[1]
-        num_positions = self.position_embedding.weight.shape[0]
-
-        # always interpolate when tracing to ensure the exported model works for dynamic input shapes
-        if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
-            return self.position_embedding(self.position_ids)
-
-        patch_pos_embed = self.position_embedding.weight.unsqueeze(0)
+        num_positions = position_embeddings.shape[1]
+        if num_patches == num_positions and height == width:
+            return position_embeddings
 
         dim = embeddings.shape[-1]
+        height = height // self.patch_size
+        width = width // self.patch_size
+        # we add a small number to avoid floating point error in the interpolation
+        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        height, width = height + 0.1, width + 0.1
 
-        new_height = height // self.patch_size
-        new_width = width // self.patch_size
-
-        sqrt_num_positions = torch_int(num_positions**0.5)
-        patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
+        patch_pos_embed = position_embeddings.reshape(
+            1, int(math.sqrt(num_positions)), int(math.sqrt(num_positions)), dim
+        )
         patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
-
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed,
-            size=(new_height, new_width),
+            scale_factor=(height / math.sqrt(num_positions), width / math.sqrt(num_positions)),
             mode="bicubic",
             align_corners=False,
         )
+        if int(height) != patch_pos_embed.shape[-2] or int(width) != patch_pos_embed.shape[-1]:
+            raise ValueError("Width or height does not match with the interpolated position embeddings")
 
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
 
     def forward(self, pixel_values: torch.FloatTensor, interpolate_pos_encoding=False) -> torch.Tensor:
         _, _, height, width = pixel_values.shape
-        target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
+        patch_embeds = self.patch_embedding(pixel_values)  # shape = [*, width, grid, grid]
         embeddings = patch_embeds.flatten(2).transpose(1, 2)
 
         if interpolate_pos_encoding:
@@ -670,7 +668,6 @@ class SiglipPreTrainedModel(PreTrainedModel):
     config_class = SiglipConfig
     base_model_prefix = "siglip"
     supports_gradient_checkpointing = True
-
     _no_split_modules = [
         "SiglipTextEmbeddings",
         "SiglipEncoderLayer",
@@ -832,7 +829,7 @@ SIGLIP_INPUTS_DOCSTRING = r"""
 """
 
 
-# Copied from transformers.models.altclip.modeling_altclip.AltCLIPEncoder with AltCLIP->Siglip
+# Copied from transformers.models.clip.modeling_clip.CLIPEncoder with CLIP->Siglip
 class SiglipEncoder(nn.Module):
     """
     Transformer encoder consisting of `config.num_hidden_layers` self attention layers. Each layer is a
@@ -1205,13 +1202,13 @@ class SiglipModel(SiglipPreTrainedModel):
         super().__init__(config)
 
         if not isinstance(config.text_config, SiglipTextConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.text_config is expected to be of type SiglipTextConfig but is of type"
                 f" {type(config.text_config)}."
             )
 
         if not isinstance(config.vision_config, SiglipVisionConfig):
-            raise TypeError(
+            raise ValueError(
                 "config.vision_config is expected to be of type SiglipVisionConfig but is of type"
                 f" {type(config.vision_config)}."
             )
@@ -1220,8 +1217,8 @@ class SiglipModel(SiglipPreTrainedModel):
         vision_config = config.vision_config
 
         # First, initialize the text and vision models with proper attention implementation
-        text_model = SiglipTextModel._from_config(text_config)
-        vision_model = SiglipVisionModel._from_config(vision_config)
+        text_model = SiglipTextModel._from_config(text_config, attn_implementation=config._attn_implementation)
+        vision_model = SiglipVisionModel._from_config(vision_config, attn_implementation=config._attn_implementation)
 
         # Second, get the text and vision submodules (for backward compatibility)
         self.text_model = text_model.text_model
@@ -1456,7 +1453,9 @@ class SiglipForImageClassification(SiglipPreTrainedModel):
 
         # Create the vision model with proper attention
         # and take only vision_model submodule (for backward compatibility)
-        vision_model = SiglipVisionModel._from_config(config.vision_config)
+        vision_model = SiglipVisionModel._from_config(
+            config.vision_config, attn_implementation=config._attn_implementation
+        )
         self.vision_model = vision_model.vision_model
 
         # Classifier head
@@ -1528,7 +1527,7 @@ class SiglipForImageClassification(SiglipPreTrainedModel):
         sequence_output = outputs[0]
 
         # average pool the patch tokens
-        sequence_output = torch.mean(sequence_output, dim=1)
+        sequence_output = torch.mean(sequence_output[:, 1:, :], dim=1)
         # apply classifier
         logits = self.classifier(sequence_output)
 

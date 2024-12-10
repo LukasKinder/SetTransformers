@@ -78,17 +78,16 @@ class ZeroShotAudioClassificationPipeline(Pipeline):
                 - A string containing a local path to an audio
                 - An audio loaded in numpy
             candidate_labels (`List[str]`):
-                The candidate labels for this audio. They will be formatted using *hypothesis_template*.
+                The candidate labels for this audio
             hypothesis_template (`str`, *optional*, defaults to `"This is a sound of {}"`):
-                The format used in conjunction with *candidate_labels* to attempt the audio classification by
-                replacing the placeholder with the candidate_labels. Pass "{}" if *candidate_labels* are
-                already formatted.
+                The sentence used in cunjunction with *candidate_labels* to attempt the audio classification by
+                replacing the placeholder with the candidate_labels. Then likelihood is estimated by using
+                logits_per_audio
         Return:
-            A list of dictionaries containing one entry per proposed label. Each dictionary contains the
+            A list of dictionaries containing result, one dictionary per proposed label. The dictionaries contain the
             following keys:
-            - **label** (`str`) -- One of the suggested *candidate_labels*.
-            - **score** (`float`) -- The score attributed by the model to that label. It is a value between
-                0 and 1, computed as the `softmax` of `logits_per_audio`.
+            - **label** (`str`) -- The label identified by the model. It is one of the suggested `candidate_label`.
+            - **score** (`float`) -- The score attributed by the model for that label (between 0 and 1).
         """
         return super().__call__(audios, **kwargs)
 
@@ -115,7 +114,7 @@ class ZeroShotAudioClassificationPipeline(Pipeline):
             audio = ffmpeg_read(audio, self.feature_extractor.sampling_rate)
 
         if not isinstance(audio, np.ndarray):
-            raise TypeError("We expect a numpy ndarray as input")
+            raise ValueError("We expect a numpy ndarray as input")
         if len(audio.shape) != 1:
             raise ValueError("We expect a single channel audio input for ZeroShotAudioClassificationPipeline")
 

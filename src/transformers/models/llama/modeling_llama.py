@@ -1075,10 +1075,7 @@ class LlamaModel(LlamaPreTrainedModel):
         if position_ids[0][0] == 0 and set_pos_encoding != None:
             position_ids = set_pos_encoding
         
-        if LOW_MEMORY_OPTION:
-            causal_mask = None
-        else:
-            causal_mask = self._update_causal_mask(attention_mask, inputs_embeds)
+        causal_mask = self._update_causal_mask(attention_mask, inputs_embeds)
 
         # embed positions
         hidden_states = inputs_embeds
